@@ -36,13 +36,14 @@ a { color: var(--cream); }
   width: 260px; background: var(--cream); border: 2px solid var(--ink);
   display: flex; flex-direction: column;
 }
-.contact-menu a {
-  display: flex; justify-content: space-between; padding: 14px 16px;
+.contact-menu a, .contact-menu button {
+  display: flex; width: 100%; cursor: pointer; background: none; border: 0; text-align: left; justify-content: space-between; padding: 14px 16px;
   border-bottom: 2px solid var(--ink); color: var(--ink); text-decoration: none;
   font: 500 14px 'DM Mono', monospace;
 }
 .contact-menu a:last-child { border-bottom: 0; }
-.contact-menu a:hover { background: var(--red); color: var(--cream); }
+.contact-menu button { border-bottom: 2px solid var(--ink); }
+.contact-menu a:hover, .contact-menu button:hover { background: var(--red); color: var(--cream); }
 
 .end-bar {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 4;
@@ -51,8 +52,88 @@ a { color: var(--cream); }
   transform: translateY(110%); transition: transform .6s cubic-bezier(.2, 1.3, .4, 1);
 }
 .end-title { font: 500 14px 'DM Mono', monospace; letter-spacing: .08em; margin-right: 10px; }
-.end-bar a {
+.end-bar a, .end-bar button {
+  background: none; cursor: pointer;
   padding: 8px 12px; border: 2px solid var(--cream); color: var(--cream);
   text-decoration: none; font: 500 13px 'DM Mono', monospace;
 }
-.end-bar a:hover { background: var(--red); border-color: var(--red); }
+.end-bar a:hover, .end-bar button:hover { background: var(--red); border-color: var(--red); }
+
+/* Career era tag: bottom-right on landscape, top-left on portrait */
+.era {
+  position: fixed; right: 24px; bottom: 22px; z-index: 3; max-width: calc(100vw - 48px); box-sizing: border-box;
+  padding: 10px 14px; background: var(--ink); color: var(--cream);
+  font-weight: 500; letter-spacing: .08em; text-align: right;
+  opacity: 0; transform: translateY(12px); pointer-events: none;
+  transition: opacity .35s, transform .45s cubic-bezier(.2, 1.3, .4, 1);
+}
+.era.on { opacity: 1; transform: none; }
+.era-when { font-size: 11px; opacity: .7; }
+.era-role { font-size: 14px; margin-top: 3px; }
+@media (orientation: portrait) {
+  .era { right: auto; left: 16px; bottom: auto; top: 18px; text-align: left; max-width: calc(100vw - 186px); }
+  .era-role { font-size: 12px; }
+}
+
+/* Mid-dig checkpoint */
+.checkpoint {
+  position: fixed; z-index: 5; right: clamp(16px, 4vw, 56px); top: 50%;
+  width: min(520px, calc(100vw - 32px)); box-sizing: border-box;
+  padding: clamp(20px, 3vw, 32px); background: var(--cream); color: var(--ink);
+  border: 2px solid var(--ink); box-shadow: 10px 10px 0 var(--ink);
+  opacity: 0; transform: translateY(-40%) rotate(2deg) scale(.92); pointer-events: none;
+  transition: opacity .3s, transform .55s cubic-bezier(.2, 1.3, .4, 1);
+}
+.checkpoint.on { opacity: 1; transform: translateY(-50%); pointer-events: auto; }
+@media (orientation: portrait) {
+  .checkpoint { right: 16px; top: auto; bottom: 16px; transform: translateY(30px) scale(.94); }
+  .checkpoint.on { transform: none; }
+}
+.cp-kicker { font-size: 12px; font-weight: 500; letter-spacing: .1em; border-bottom: 2px solid currentColor; padding-bottom: 10px; }
+.cp-title, .dossier-name { margin: 14px 0 6px; font: 400 clamp(38px, 5vw, 60px)/.95 'Titan One', sans-serif; }
+.cp-body { margin: 0 0 16px; font-size: 14px; line-height: 1.55; }
+.cp-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 18px; }
+.cp-stats div { border-top: 2px solid var(--ink); padding-top: 8px; display: flex; flex-direction: column; gap: 4px; }
+.cp-stats strong { font: 400 26px/1 'Titan One', sans-serif; color: var(--red); }
+.cp-stats span { font-size: 10.5px; font-weight: 500; letter-spacing: .06em; }
+.cp-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.btn {
+  display: inline-flex; align-items: center; height: 42px; padding: 0 14px; box-sizing: border-box; cursor: pointer;
+  background: var(--cream); color: var(--ink); border: 2px solid var(--ink); text-decoration: none;
+  font: 500 13px 'DM Mono', monospace; letter-spacing: .06em;
+}
+.btn:hover { background: var(--red); color: var(--cream); border-color: var(--red); }
+.btn-ink { background: var(--ink); color: var(--cream); }
+.cp-foot { margin-top: 16px; font-size: 11px; font-weight: 500; letter-spacing: .1em; opacity: .6; }
+
+/* "More about me" sheet */
+.dossier-backdrop {
+  position: fixed; inset: 0; z-index: 20; background: rgba(23, 22, 26, .72);
+  display: flex; justify-content: center; overflow-y: auto; padding: clamp(12px, 4vw, 48px); box-sizing: border-box;
+  animation: fade .25s ease-out;
+}
+.dossier {
+  position: relative; width: min(860px, 100%); height: max-content; box-sizing: border-box;
+  padding: clamp(22px, 4vw, 48px); background: var(--cream); color: var(--ink);
+  border: 2px solid var(--ink); box-shadow: 12px 12px 0 var(--red);
+  font-size: 14px; line-height: 1.6; animation: rise .5s cubic-bezier(.2, 1.3, .4, 1);
+}
+.dossier-close { position: absolute; top: 18px; right: 18px; }
+.dossier-close { height: 36px; padding: 0 12px; cursor: pointer; background: var(--ink); color: var(--cream); border: 0; font: 500 12px 'DM Mono', monospace; letter-spacing: .06em; }
+.dossier-close:hover { background: var(--red); }
+.dossier .cp-kicker { margin-right: 110px; }
+.dossier-title { font-weight: 500; letter-spacing: .04em; }
+.dossier-summary { margin: 16px 0 20px; max-width: 64ch; }
+.dossier-h { margin: 34px 0 12px; font: 500 13px 'DM Mono', monospace; letter-spacing: .1em; border-bottom: 2px solid var(--ink); padding-bottom: 8px; }
+.dossier-job { margin-bottom: 18px; }
+.dossier-job-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 6px; }
+.dossier-job-head em { margin-left: auto; font-style: normal; font-size: 12px; opacity: .7; }
+.dossier ul { margin: 8px 0 0; padding-left: 18px; }
+.dossier li { margin-bottom: 6px; }
+.dossier-skills { margin: 0; display: grid; gap: 8px; }
+.dossier-skills div { display: grid; grid-template-columns: 160px 1fr; gap: 12px; }
+.dossier-skills dt { font-weight: 500; }
+.dossier-skills dd { margin: 0; }
+@media (max-width: 560px) { .dossier-skills div { grid-template-columns: 1fr; gap: 0; } }
+@keyframes fade { from { opacity: 0; } }
+@keyframes rise { from { transform: translateY(40px) rotate(-1deg); opacity: 0; } }

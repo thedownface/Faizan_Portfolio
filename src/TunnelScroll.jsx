@@ -13,7 +13,7 @@ const loadFonts = () =>
   ]);
 
 // Fixed full-screen stage whose GSAP timeline is scrubbed by page scroll.
-// onFrame(time, duration) runs every tick for overlay UI (progress bar, hints).
+// onFrame(progress, time, duration) runs every tick for overlay UI (progress bar, hints).
 export default function TunnelScroll({ onFrame }) {
   const wrapRef = useRef(null);
   const stageRef = useRef(null);
@@ -31,7 +31,7 @@ export default function TunnelScroll({ onFrame }) {
 
     loadFonts().then(() => {
       if (cancelled) return;
-      scene = new TunnelScene(wrapRef.current, stageRef.current, (t, d) => frameRef.current?.(t, d));
+      scene = new TunnelScene(wrapRef.current, stageRef.current, (...args) => frameRef.current?.(...args));
       scene.setProgress(progress());
       scene.start(scene.target);
     });

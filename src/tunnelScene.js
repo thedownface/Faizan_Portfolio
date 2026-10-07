@@ -17,31 +17,42 @@ const POSE={
  LOOK:{torso:-2,head:-18,uaF:-18,laF:-100,uaB:12,laB:-24,thF:-4,shF:4,thB:6,shB:2},
  LEAN:{torso:62,head:-20,uaF:-62,laF:0,uaB:-58,laB:0,thF:-8,shF:6,thB:10,shB:0},
  HAND:{rot:180,torso:0,head:0,uaF:180,laF:0,uaB:180,laB:0,thF:-10,shF:0,thB:10,shB:0},
- PLAN:{rot:270,torso:0,head:-14,uaF:90,laF:0,uaB:90,laB:0,thF:0,shF:0,thB:0,shB:0}
+ PLAN:{rot:270,torso:0,head:-14,uaF:90,laF:0,uaB:90,laB:0,thF:0,shF:0,thB:0,shB:0},
+ LOOKUP:{torso:-4,head:-24,uaF:-6,laF:-12,uaB:8,laB:-16,thF:-4,shF:4,thB:6,shB:2},
+ GRAB:{torso:-4,head:-16,uaF:-125,laF:-20,uaB:-118,laB:-24,thF:-4,shF:4,thB:6,shB:2,tilt:0},
+ BUCKET:{torso:6,head:4,uaF:-10,laF:-15,uaB:14,laB:-20,thF:-4,shF:4,thB:6,shB:2,tilt:0},
+ POUR:{torso:18,head:10,uaF:-95,laF:-10,uaB:-80,laB:-25,thF:-10,shF:8,thB:12,shB:4,tilt:107}
 };
-export const DUR=61.5;
+export const DUR=65.3;
 // Scroll position 0 opens on this frame: the carved "FAIZAN KHAN" identity shot.
 export const START=14.4;
+// Scroll ranges where the timeline freezes (len in timeline-seconds of scroll) — the mid-dig checkpoint.
+export const HOLDS=[{t:39.95,len:5}];
+const SPAN=DUR-START+HOLDS.reduce((a,h)=>a+h.len,0);
+const vToT=v=>{let t=START+v;for(const h of HOLDS){if(t<=h.t)break;t=Math.max(h.t,t-h.len);}return t;};
+// Each hold as a [from,to] range of scroll progress (0-1).
+export const HOLD_RANGES=HOLDS.map((h,i)=>{const p0=(h.t-START+HOLDS.slice(0,i).reduce((a,x)=>a+x.len,0))/SPAN;return [p0,p0+h.len/SPAN];});
 
 export class TunnelScene {
   // wrap: fixed viewport element; stage: element the SVG layers are built into.
   // ui: optional per-frame callback receiving (scroll progress 0-1, time, duration).
   constructor(wrap,stage,ui){this.wrap=wrap;this.stage=stage;this.ui=ui;this.cur=0;this.target=0;this.V=null;}
 
-  start(t=0){
-    this.build(innerWidth<innerHeight,t);this.cur=this.target=t;
-    this.ro=new ResizeObserver(()=>{const nv=innerWidth<innerHeight;if(nv!==this.V)this.build(nv,this.cur);else this.fit();});this.ro.observe(this.wrap);
+  // cur/target are virtual scroll units (0..SPAN); vToT maps them onto timeline time.
+  start(v=0){
+    this.build(innerWidth<innerHeight,vToT(v));this.cur=this.target=v;
+    this.ro=new ResizeObserver(()=>{const nv=innerWidth<innerHeight;if(nv!==this.V)this.build(nv,vToT(this.cur));else this.fit();});this.ro.observe(this.wrap);
     this.tick=()=>this.onTick();gsap.ticker.add(this.tick);
   }
-  setProgress(p){this.target=START+Math.min(1,Math.max(0,p))*(DUR-START);}
+  setProgress(p){this.target=Math.min(1,Math.max(0,p))*SPAN;}
   dispose(){if(this.tl)this.tl.kill();if(this.tick)gsap.ticker.remove(this.tick);if(this.ro)this.ro.disconnect();this.stage.innerHTML='';}
 
   fit(){const w=this.wrap,s=this.stage;if(!w||!s)return;const W=this.W,H=this.H;const sc=Math.min(w.clientWidth/W,w.clientHeight/H);
     s.style.width=W+'px';s.style.height=H+'px';s.style.transform=`translate(${(w.clientWidth-W*sc)/2}px,${(w.clientHeight-H*sc)/2}px) scale(${sc})`;}
 
   onTick(){if(!this.tl)return;const dlt=this.target-this.cur;this.cur=Math.abs(dlt)<.002?this.target:this.cur+dlt*.09;
-    if(Math.abs(this.tl.time()-this.cur)>.0005)this.tl.time(this.cur);
-    if(this.ui)this.ui((this.cur-START)/(DUR-START),this.cur,DUR);
+    const t=vToT(this.cur);if(Math.abs(this.tl.time()-t)>.0005)this.tl.time(t);
+    if(this.ui)this.ui(this.cur/SPAN,t,DUR);
     const now=performance.now();if(!this.lb||now-this.lb>83){this.lb=now;this.bf=(this.bf+1)%3;const id='url(#boil'+this.bf+')';for(const g of this.boilEls)g.setAttribute('filter',id);}}
 
   build(V,startT){
@@ -63,10 +74,15 @@ export class TunnelScene {
     const world=mk('g',{},svg);const fgL=mk('g',{},svg);
     mk('rect',{x:-4000,y:-3000,width:20000,height:9000,fill:R},world);
 
-    const tl=gsap.timeline({paused:true,onUpdate:()=>this.render()});this.tl=tl;
+    const root=gsap.timeline({paused:true,onUpdate:()=>this.render()});this.tl=root;
+    // Helpers write through `tl`. Pointing it at shifted(o) replays a block authored in its original seconds `o` later.
+    let tl=root;
+    const shifted=o=>({to:(a,b,p)=>root.to(a,b,p+o),set:(a,b,p)=>root.set(a,b,p+o),fromTo:(a,b,c,p)=>root.fromTo(a,b,c,p+o)});
+    // World offsets for sections authored in their original coordinates: graph cavern west, agents + treasure east.
+    const KGX=-1300,AGX=3410,TRX=1460;
     const cam={x:P(960,800),y:540,s:P(1,.8)},sh={x:0,y:0};
-    const rig={x:-160,y:700,rot:0,sx:1,sy:1,walk:0,wp:0,climb:0,cp:0,pin:0,px:0,py:0,pick:1,...POSE.CARRY};
-    const dig1={x:0},shaft={y:700},cav={x:7000},flow={t:0};
+    const rig={x:-160,y:700,rot:0,sx:1,sy:1,walk:0,wp:0,climb:0,cp:0,pin:0,px:0,py:0,pick:1,bucket:0,tilt:0,...POSE.CARRY};
+    const dig1={x:0},shaft={y:700},cav={x:7000},flow={t:0},pipe={x:1200};
     this.cam=cam;this.sh=sh;this.rig=rig;
 
     // ---------- geometry helpers
@@ -88,17 +104,31 @@ export class TunnelScene {
     for(let r=0;r<8;r++){const y=1480+r*68;for(let c=-1;c<8;c++){const x=4720+c*134+(r%2?67:0);if(x<4700||x+120>5760)continue;mk('path',{d:rect(x,y,120,52,2,40)},strat);}}
     for(let i=0;i<3;i++){const x=4780+i*240;mk('path',{d:rect(x-20,2090,160,28,2,40)},strat);mk('path',{d:rect(x,2118,120,300,3,40)},strat);mk('path',{d:rect(x-20,2418,160,28,2,40)},strat);}
 
-    // ---------- carved: tunnel 1 + pipeline
+    // ---------- carved: tunnel 1
     const clip1=mk('clipPath',{id:'c1'},defs);const c1r=mk('rect',{x:-2000,y:300,width:0,height:700},clip1);
     const t1=mk('g',{'clip-path':'url(#c1)'},world);
     mk('path',{d:rect(-1700,400,6350,300,5,42),fill:K},t1);
-    mk('path',{d:rect(1760,772,2560,56,3,40),fill:K},t1);
-    const pebG=mk('g',{opacity:0},t1);const pebs=[];for(let i=0;i<46;i++)pebs.push(mk('path',{d:blob(0,0,rr(7,11),6),fill:I},pebG));
-    const stX=[1900,2460,3020,3580,4140],stN=['SOURCE','DEBEZIUM','KAFKA','SPARK','DELTA LAKE'];const stations=[];
-    stX.forEach((x,i)=>{const g=mk('g',{},t1);mk('path',{d:rect(x-155,728,310,144,4,36),fill:K},g);const tx=mk('text',{x:x,y:815,'text-anchor':'middle','font-family':'DM Mono','font-weight':500,'font-size':42,fill:I},g);tx.textContent=stN[i];stations.push(g);
-      if(i<4){const mx=x+280;mk('path',{d:`M${mx-12} 786L${mx+10} 800L${mx-12} 814`,stroke:I,'stroke-width':6,fill:'none'},g);}});
     const face1=mk('path',{d:roughPoly([[-2,398],[46,400],[30,440],[62,488],[34,540],[52,600],[18,650],[24,702],[-2,702]],3,30),fill:K,opacity:0},world);
     const crack=mk('path',{d:'M-20 552 L60 548 L110 556 L170 546 L240 553 L300 549 L380 555 L460 550 L520 552',fill:'none',stroke:K,'stroke-width':4,'stroke-dasharray':600,'stroke-dashoffset':600},world);
+
+    // ingest: a well up to the cloud bucket, a hopper down into SOURCE, and the CDC pipeline (revealed by pipe.x)
+    const bucketD=p=>{const g=mk('g',{transform:'scale(.75)'},p);
+      mk('path',{d:'M-30 40 Q0 -36 30 40',stroke:I,'stroke-width':5,fill:'none'},g);
+      mk('path',{d:'M-24 38L-24 24L-10 24L-10 38Z M-7 38L-5 18L9 20L7 38Z M11 38L13 26L26 28L24 38Z',fill:K,stroke:I,'stroke-width':3},g);
+      mk('path',{d:'M-37 36L37 36L35 46L26 104L-26 104L-35 46Z',fill:I},g);
+      mk('path',{d:'M-31 58L31 58L30.5 63L-30.5 63Z M-28 84L28 84L27.5 89L-27.5 89Z',fill:K},g);return g;};
+    const well=mk('path',{d:rect(1257,-900,60,1306,4,40),fill:K},world);
+    const clip4=mk('clipPath',{id:'c4'},defs);const c4r=mk('rect',{x:1200,y:700,width:0,height:200},clip4);
+    const pipeG=mk('g',{'clip-path':'url(#c4)'},world);
+    mk('path',{d:rect(1240,772,3080,56,3,40),fill:K},pipeG);
+    const pebG=mk('g',{opacity:0},pipeG);const pebs=[];for(let i=0;i<56;i++)pebs.push(mk('path',{d:blob(0,0,rr(7,11),6),fill:I},pebG));
+    const stX=[1400,2085,2770,3455,4140],stN=['SOURCE','DEBEZIUM','REDPANDA','SPARK','DELTA LAKE'];const stations=[];
+    stX.forEach((x,i)=>{if(i<4){const mx=x+342;mk('path',{d:`M${mx-12} 786L${mx+10} 800L${mx-12} 814`,stroke:I,'stroke-width':6,fill:'none'},pipeG);}
+      const g=mk('g',{},world);mk('path',{d:rect(x-155,728,310,144,4,36),fill:K},g);const tx=mk('text',{x:x,y:815,'text-anchor':'middle','font-family':'DM Mono','font-weight':500,'font-size':42,fill:I},g);tx.textContent=stN[i];stations.push(g);});
+    const hopper=mk('path',{d:'M1350 690L1450 690L1424 736L1376 736Z',fill:K},world);
+    const hangO=mk('g',{transform:'translate(1287,470)',opacity:0},world);const hang=mk('g',{},hangO);
+    const ropeG=mk('g',{},hang);mk('path',{d:'M0 -1500V4',stroke:I,'stroke-width':4},ropeG);const hangB=bucketD(hang);
+    const bkFloor=mk('g',{transform:'translate(1319,622) rotate(-6)',opacity:0},world);bucketD(bkFloor);
 
     // shaft
     const clip2=mk('clipPath',{id:'c2'},defs);const c2r=mk('rect',{x:4380,y:690,width:340,height:0},clip2);
@@ -107,23 +137,14 @@ export class TunnelScene {
     mk('path',{d:'M4505 700V2850M4595 700V2850',stroke:I,'stroke-width':4},shG);
     let rungs='';for(let y=740;y<2850;y+=46)rungs+=`M4505 ${y}L4595 ${y+rr(-4,4)}`;mk('path',{d:rungs,stroke:I,'stroke-width':4},shG);
 
-    // agents
-    const synRays=mk('g',{transform:'translate(6700,2705)'},world);const synRaysIn=mk('g',{},synRays);
-    for(let i=0;i<14;i++){const a=i/14*Math.PI*2,b=a+0.13,L=i%2?380:520;mk('path',{d:`M0 0L${Math.cos(a)*L} ${Math.sin(a)*L}L${Math.cos(b)*L} ${Math.sin(b)*L}Z`,fill:K},synRaysIn);}
-    const AG=[[5700,2290],[5700,2450],[5700,3010],[5700,3170]];
-    const tunA=[],tunB=[],agG=[];
-    AG.forEach((a,i)=>{const s0=i<2?[4980+i*110,2610]:[4980+(i-2)*110,2835];const e0=i<2?[6300-i*110,2610]:[6300-(i-2)*110,2835];
-      const pa=mk('path',{d:`M${s0[0]} ${s0[1]}L${(s0[0]+a[0])/2+rr(-20,20)} ${(s0[1]+a[1])/2+rr(-15,15)}L${a[0]-100} ${a[1]}`,stroke:K,'stroke-width':48,fill:'none','stroke-linejoin':'round'},world);
-      const pb=mk('path',{d:`M${a[0]+100} ${a[1]}L${(e0[0]+a[0])/2+rr(-20,20)} ${(e0[1]+a[1])/2+rr(-15,15)}L${e0[0]} ${e0[1]}`,stroke:K,'stroke-width':48,fill:'none','stroke-linejoin':'round'},world);
-      tunA.push(pa);tunB.push(pb);});
+    // landing under the shaft and the passage east to the knowledge-graph cavern
     mk('path',{d:rect(4250,2580,650,272,5,40),fill:K},world);
-    mk('path',{d:rect(4880,2588,1560,264,5,40),fill:K},world);
-    AG.forEach(a=>agG.push(mk('path',{d:rect(a[0]-125,a[1]-72,250,144,4,34),fill:K},world)));
-    const syn=mk('path',{d:rect(6400,2560,600,292,5,40),fill:I},world);
+    mk('path',{d:rect(4880,2588,820,264,5,40),fill:K},world);
 
-    // cavern + tunnel 2
+    // knowledge graph + MCP cavern (original coordinates, shifted by KGX)
+    const kgW=mk('g',{transform:`translate(${KGX},0)`},world);
     const clip3=mk('clipPath',{id:'c3'},defs);const c3r=mk('rect',{x:6990,y:1900,width:0,height:1000},clip3);
-    const cvG=mk('g',{'clip-path':'url(#c3)'},world);
+    const cvG=mk('g',{'clip-path':'url(#c3)'},kgW);
     mk('path',{d:roughPoly([[7000,2060],[7300,2020],[7800,2034],[8300,2018],[8310,2550],[8960,2550],[8960,2852],[7000,2852]],6,40),fill:K},cvG);
     const NODES=[[7330,2520],[7460,2680],[7560,2470],[7650,2765],[7760,2590],[7860,2450],[7940,2720],[8040,2560],[8150,2780],[8210,2470],[7400,2790],[8080,2420]];
     const EDGES=[[0,1],[0,2],[1,3],[1,4],[2,4],[2,5],[3,6],[4,6],[4,7],[5,7],[5,11],[6,8],[7,8],[7,9],[9,11],[1,10],[3,10]];
@@ -137,26 +158,49 @@ export class TunnelScene {
       const n=NODES[DN[i]];dpaths.push(mk('path',{d:`M${x} 2272L${x+rr(-10,10)} 2340L${n[0]} ${n[1]}`,stroke:R,'stroke-width':8,fill:'none','stroke-dasharray':400,'stroke-dashoffset':400},cvG));});
     const bound=mk('path',{d:'M7030 2340L8290 2340',stroke:R,'stroke-width':9,'stroke-dasharray':'28 14',opacity:0},cvG);
     const boundL=mk('text',{x:7030,y:2392,'font-family':'DM Mono','font-weight':500,'font-size':38,fill:I,opacity:0},cvG);boundL.textContent='VALIDATION BOUNDARY';
-    const face2=mk('path',{d:roughPoly([[-2,2548],[40,2550],[22,2610],[56,2680],[28,2760],[44,2852],[-2,2852]],3,30),fill:K,opacity:0},world);
+    const face2=mk('path',{d:roughPoly([[-2,2548],[40,2550],[22,2610],[56,2680],[28,2760],[44,2852],[-2,2852]],3,30),fill:K,opacity:0},kgW);
 
-    // treasure chamber
-    mk('path',{d:rect(8950,2300,1350,552,6,40),fill:K},world);
-    const lanternsG=mk('g',{},world);
+    // MCP connector: from the last MCP door through the rock, down into the agents' supervisor
+    const CONN='M6990 2200L7790 2200L7790 2590';
+    const conn=mk('path',{d:CONN,stroke:K,'stroke-width':44,fill:'none','stroke-linejoin':'round'},world);
+    const connL=mk('path',{d:CONN,stroke:R,'stroke-width':8,fill:'none','stroke-linejoin':'round'},world);
+
+    // agents (original coordinates, shifted by AGX)
+    const agW=mk('g',{transform:`translate(${AGX},0)`},world);
+    const synRays=mk('g',{transform:'translate(6700,2705)'},agW);const synRaysIn=mk('g',{},synRays);
+    for(let i=0;i<14;i++){const a=i/14*Math.PI*2,b=a+0.13,L=i%2?380:520;mk('path',{d:`M0 0L${Math.cos(a)*L} ${Math.sin(a)*L}L${Math.cos(b)*L} ${Math.sin(b)*L}Z`,fill:K},synRaysIn);}
+    const AG=[[5700,2290],[5700,2450],[5700,3010],[5700,3170]];
+    const tunA=[],tunB=[],agG=[];
+    AG.forEach((a,i)=>{const s0=i<2?[4980+i*110,2610]:[4980+(i-2)*110,2835];const e0=i<2?[6300-i*110,2610]:[6300-(i-2)*110,2835];
+      const pa=mk('path',{d:`M${s0[0]} ${s0[1]}L${(s0[0]+a[0])/2+rr(-20,20)} ${(s0[1]+a[1])/2+rr(-15,15)}L${a[0]-100} ${a[1]}`,stroke:K,'stroke-width':48,fill:'none','stroke-linejoin':'round'},agW);
+      const pb=mk('path',{d:`M${a[0]+100} ${a[1]}L${(e0[0]+a[0])/2+rr(-20,20)} ${(e0[1]+a[1])/2+rr(-15,15)}L${e0[0]} ${e0[1]}`,stroke:K,'stroke-width':48,fill:'none','stroke-linejoin':'round'},agW);
+      tunA.push(pa);tunB.push(pb);});
+    mk('path',{d:rect(4250,2580,650,272,5,40),fill:K},agW);
+    mk('path',{d:rect(4880,2588,1560,264,5,40),fill:K},agW);
+    AG.forEach(a=>agG.push(mk('path',{d:rect(a[0]-125,a[1]-72,250,144,4,34),fill:K},agW)));
+    const syn=mk('path',{d:rect(6400,2560,600,292,5,40),fill:I},agW);
+    const lanternsG=mk('g',{},agW);const agLbl=mk('g',{},agW);
+
+    // treasure chamber (original coordinates, shifted by TRX)
+    const trW=mk('g',{transform:`translate(${TRX},0)`},world);
+    mk('path',{d:rect(8950,2300,1350,552,6,40),fill:K},trW);
     const labelsG=mk('g',{},world);
-    const coverG=mk('g',{},world);const covers=[];const cx=[8930,9280,9620,9960,10320];
+    const coverG=mk('g',{},trW);const covers=[];const cx=[8930,9280,9620,9960,10320];
     for(let i=0;i<4;i++){const g=mk('g',{},coverG);mk('path',{d:roughPoly([[cx[i]-(i?24:0),2280],[cx[i+1]+24,2280],[cx[i+1]+24,2560],[cx[i+1]+24,2870],[cx[i]-(i?24:0),2870],[cx[i]-(i?24:0),2580]],4,40),fill:R},g);mk('path',{d:speckPath(cx[i]+20,cx[i+1]-20,2300,2850,40,1),fill:I},g);covers.push(g);}
-    const TOOLS=['PYTHON','SQL','PYSPARK','DATABRICKS','KAFKA','AIRFLOW','LANGGRAPH','MCP','CLAUDE','FASTAPI','AZURE','POSTGRES'];
-    const rocks=TOOLS.map((n,i)=>{const c=i%4,r=Math.floor(i/4);const x=8970+c*288,y=2852-(r+1)*100;const g=mk('g',{},world);const inn=mk('g',{},g);
+    const TOOLS=['PYTHON','SQL','PYSPARK','DATABRICKS','KAFKA','AIRFLOW','LANGGRAPH','MCP','STARDOG','FASTAPI','AZURE','POSTGRES'];
+    const rocks=TOOLS.map((n,i)=>{const c=i%4,r=Math.floor(i/4);const x=8970+c*288,y=2852-(r+1)*100;const g=mk('g',{},trW);const inn=mk('g',{},g);
       mk('path',{d:rect(x,y+3,280,96,5,30),fill:K},inn);const t=mk('text',{x:x+140,y:y+64,'text-anchor':'middle','font-family':'DM Mono','font-weight':500,'font-size':40,fill:I},inn);t.textContent=n;return {el:inn,x:x+140,y:y+50};});
-    const chestRays=mk('g',{transform:'translate(9550,2700)'},world);const crIn=mk('g',{},chestRays);
+    const chestRays=mk('g',{transform:'translate(9550,2700)'},trW);const crIn=mk('g',{},chestRays);
     for(let i=0;i<18;i++){const a=i/18*Math.PI*2,b=a+0.12,L=i%2?1500:2400;mk('path',{d:`M0 0L${Math.cos(a)*L} ${Math.sin(a)*L}L${Math.cos(b)*L} ${Math.sin(b)*L}Z`,fill:K},crIn);}
-    const flood=mk('circle',{cx:9550,cy:2700,r:0,fill:K},world);
-    const chest=mk('g',{},world);
+    const flood=mk('circle',{cx:9550,cy:2700,r:0,fill:K},trW);
+    const chest=mk('g',{},trW);
     mk('path',{d:rect(9430,2712,240,140,2,30),fill:I},chest);
     mk('rect',{x:9478,y:2712,width:14,height:140,fill:K},chest);mk('rect',{x:9608,y:2712,width:14,height:140,fill:K},chest);
     mk('rect',{x:9536,y:2736,width:28,height:34,fill:K},chest);mk('rect',{x:9546,y:2748,width:8,height:14,fill:I},chest);
     const lidO=mk('g',{transform:'translate(9670,2712)'},chest);const lid=mk('g',{},lidO);
     mk('path',{d:'M-240 0 L-240 -30 Q-120 -78 0 -30 L0 0Z',fill:I},lid);mk('path',{d:'M-198 -4 L-198 -44 L-184 -46 L-184 -4Z M-62 -4 L-62 -46 L-48 -44 L-48 -4Z',fill:K},lid);
+    // speckle the rock past the old east edge
+    [[11400,13400,2860,3800,450,1.2],[11400,13400,1300,2300,120,1]].forEach(a=>mk('path',{d:speckPath(...a),fill:I},spk));
 
     // pickaxe drawing
     const pickD=(p,sc)=>{const g=mk('g',{},p);mk('path',{d:'M-3.5 -14L3.5 -14L4 116L-4 116Z',fill:I},g);mk('path',{d:'M-46 122 Q-14 98 0 104 Q16 98 52 108 L50 115 Q14 110 0 117 Q-14 112 -44 129 Z',fill:I},g);return g;};
@@ -177,7 +221,8 @@ export class TunnelScene {
     const legF=mkLeg(4);hip.insertBefore(legF.th,torso);
     const armF=mkArm(2);torso.appendChild(armF.ua);
     const pickHand=pickD(armF.hand);
-    this.R={dg,hip,torso,head,armB,armF,legB,legF,pickBack,pickHand};
+    const bucketHand=mk('g',{opacity:0},armF.hand);const bucketIn=mk('g',{},bucketHand);bucketD(bucketIn);
+    this.R={dg,hip,torso,head,armB,armF,legB,legF,pickBack,pickHand,bucketHand,bucketIn};
     const fx=mk('g',{},world);
     // fg dust
     let fd='';for(let i=0;i<700;i++){fd+=blob(rr(-2500,14500),rr(-800,4800),rr(2.5,5.5),5);}mk('path',{d:fd,fill:I,opacity:.85},fgL);
@@ -214,6 +259,14 @@ export class TunnelScene {
     const typeOn=(T,L,st=.025)=>L.forEach((l,i)=>tl.set(l.el,{opacity:1},T+i*st));
     const dropOut=(T,L,st=.018)=>L.forEach((l,i)=>tl.to(l.el,{keyframes:[{y:-l.size*.3,duration:.12,ease:'power2.out'},{y:H*1.1,rotation:rr(-120,120),duration:.65,ease:'power2.in'}]},T+i*st));
     const popEl=(T,e,d=.45)=>{gsap.set(e,{scale:0,transformOrigin:'50% 50%'});tl.to(e,{scale:1,duration:d,ease:'back.out(2.6)'},T);};
+    // Ink "impact card" in the HUD: slab pops in, headline letters pop, caption types on; whole card drops at `end`.
+    const card=(T,end,big,lines,pos,w)=>{const pad=P(30,34),bs=P(58,64),ls=P(24,30),lh=1.45;
+      const h=pad*2+bs*.95+lines.length*ls*lh+P(8,10);const g=mk('g',{},hudT);
+      const slab=mk('path',{d:rect(pos[0],pos[1],w,h,4,40),fill:I},g);
+      const B=text(g,[big],{x:pos[0]+pad,y:pos[1]+pad+bs*.78,size:bs,maxW:w-2*pad});
+      const S=text(g,lines,{x:pos[0]+pad,y:pos[1]+pad+bs*.95+ls*1.15,size:ls,font:'DM Mono',wt:500,lh,maxW:w-2*pad});
+      popEl(T,slab,.4);popIn(T+.15,B,.03);typeOn(T+.45,S,.012);
+      gsap.set(g,{transformOrigin:'50% 50%'});tl.to(g,{keyframes:[{y:-20,duration:.12,ease:'power2.out'},{y:H*1.2,rotation:rr(-10,10),duration:.6,ease:'power2.in'}]},end);};
 
     // ---------- fx
     const burst=(T,x,y,o)=>{const n=o.n||8,sp=o.speed||420,gr=o.g||2200,dm=o.dur||1;
@@ -229,6 +282,9 @@ export class TunnelScene {
           else e.setAttribute('transform',`translate(${x+vx*tt},${y+vy*tt+.5*gr*tt*tt}) rotate(${rot*p.t})`);}},T);}};
     const flash=(T,x,y,r=70)=>{let d='M';for(let i=0;i<20;i++){const a=i/20*Math.PI*2,q=i%2?r*.38:r*rr(.8,1.2);d+=(x+Math.cos(a)*q).toFixed(1)+' '+(y+Math.sin(a)*q).toFixed(1)+(i<19?'L':'Z');}
       const e=mk('path',{d,fill:K,stroke:I,'stroke-width':3,opacity:0},fx);tl.set(e,{opacity:1},T);tl.set(e,{opacity:0},T+.067);};
+    // data chunks falling from the bucket mouth (x0,y0) into the hopper (x1,y1)
+    const pour=(T,x0,y0,x1,y1,n,span)=>{for(let i=0;i<n;i++){const e=mk('rect',{x:-6,y:-6,width:12,height:12,fill:I,opacity:0},fx);const p={t:0},dx=rr(-8,8),ex=x1+rr(-16,16),rot=rr(-200,200),d=rr(.28,.36);
+      tl.to(p,{t:1,duration:d,ease:'power2.in',onUpdate:()=>{if(p.t<=0||p.t>=1){e.setAttribute('opacity',0);return;}e.setAttribute('opacity',1);e.setAttribute('transform',`translate(${x0+dx+(ex-x0-dx)*p.t},${y0+(y1-y0)*p.t}) rotate(${rot*p.t})`);}},T+i*span/n);}};
     const shake=(T,a=10)=>tl.to(sh,{keyframes:[{x:a,y:-a*.6,duration:.03},{x:-a*.8,y:a*.5,duration:.04},{x:a*.5,y:-a*.3,duration:.04},{x:-a*.2,y:a*.15,duration:.04},{x:0,y:0,duration:.05}]},T);
     const impact=(T,x,y,o={})=>{const k=o.k||1;flash(T,x,y,70*k);shake(T,(o.amp||10)*k);burst(T,x,y,{n:o.chips??7,dir:o.dir??-1,speed:480*k,size:22*k,dur:o.slow?2:1,g:o.slow?900:2200});burst(T,x,y,{n:10,kind:'speck',dir:o.dir??-1,speed:560,dur:o.slow?2:1,g:o.slow?900:2200});burst(T,x,y+30,{n:3,kind:'puff',dir:0,speed:120,dur:o.slow?1.6:.8});};
     const pose=(T,p,d=.25,ease='power2.inOut')=>tl.to(rig,{...p,duration:d,ease},T);
@@ -241,7 +297,7 @@ export class TunnelScene {
       if(o.rest!==false)tl.to(rig,{...(o.rest||POSE.CARRY),duration:o.restDur||.35,ease:'power2.inOut'},T+f);
       if(o.at)impact(T,o.at[0],o.at[1],o);};
     const camTo=(T,d,h,v,ease='power2.inOut')=>tl.to(cam,{...(V?v:h),duration:d,ease},T);
-    const tag=(T,str,pos,end)=>{const L=text(hudT,[str],{x:pos[0],y:pos[1],size:P(28,38),font:'DM Mono',wt:500,maxW:W-2*pos[0]});typeOn(T,L);if(end)dropOut(end,L);return L;};
+    const tag=(T,str,pos,end)=>{const L=text(hudT,[str],{x:pos[0],y:pos[1],size:P(28,38),font:'DM Mono',wt:500,maxW:W-pos[0]-P(120,90)});typeOn(T,L);if(end)dropOut(end,L);return L;};
     const placed=(p,s,o)=>Object.assign({x:P(120,90),maxW:P(1680,900),size:s},o,{y:p});
 
     // ================= TIMELINE =================
@@ -270,16 +326,39 @@ export class TunnelScene {
     const id1=text(world,['FAIZAN KHAN'],{x:200,y:565,size:104,fill:I});const id2=text(world,['DATA + AI ENGINEER'],{x:204,y:648,size:52,fill:I});
     carveIn(12.25,id1,.075);carveIn(13.1,id2,.045);
     walk(12.7,1240,.7,'power1.inOut');
-    // CDC 15-23
-    strike(15.0,{at:[1448,576],wind:.42});tl.to(dig1,{x:4650,duration:1.35,ease:'power2.inOut'},15.04);
-    stations.forEach((s,i)=>popEl(15.5+i*.17,s,.5));gsap.set(stations.map(s=>s),{transformOrigin:'50% 50%'});
-    tl.set(pebG,{opacity:1},16.1);tl.to(flow,{t:7.4,duration:7.4,ease:'none'},16.1);
-    camTo(15.2,1.2,{x:2300,y:610,s:.8},{x:1700,y:650,s:.7});
-    tl.to(cam,{x:P(3600,4300),duration:6,ease:'none'},16.4);
-    const tg1=tag(15.6,'LAYER I · CHANGE DATA CAPTURE',P([120,86],[90,1820]),22.4);
+    // INGEST 15-23: a bucket comes down from the cloud, gets poured into SOURCE, and the raw stream opens the tunnel ahead
+    pose(15.0,{...POSE.CARRY,uaF:150,laF:40,torso:0},.18,'power2.out');tl.set(rig,{pick:2},15.17);pose(15.2,POSE.LOOKUP,.3);
+    gsap.set(well,{scaleY:0,transformOrigin:'50% 100%'});tl.to(well,{scaleY:1,duration:.35,ease:'steps(4)'},15.1);
+    burst(15.12,1287,410,{n:5,kind:'puff',dir:0,speed:140,dur:.7});burst(15.12,1287,410,{n:8,kind:'speck',dir:0,speed:260,dur:.8});shake(15.1,4);
+    tl.set(hangO,{opacity:1},15.3);gsap.set(hang,{y:P(-900,-1400)});
+    tl.to(hang,{keyframes:[{y:0,duration:.8,ease:'power2.out'},{y:-12,duration:.1,ease:'power1.out'},{y:0,duration:.18,ease:'power1.in'}]},15.3);
+    const bkL=text(world,['CLOUD BUCKET'],{x:P(1340,975),y:P(372,330),size:34,font:'DM Mono',wt:500});popIn(15.8,bkL,.03);dropOut(16.7,bkL);
+    pose(16.2,POSE.GRAB,.3);
+    tl.set(rig,{bucket:1},16.55);tl.set(hangB,{opacity:0},16.55);tl.to(ropeG,{y:-1000,duration:.5,ease:'power2.in'},16.6);
+    pose(16.55,POSE.BUCKET,.3,'power2.out');
+    walk(16.9,1295,.35,'power1.inOut');
+    popEl(17.0,hopper,.35);
+    pose(17.25,POSE.POUR,.3);
+    pour(17.5,1418,552,1400,745,16,.5);
+    popEl(17.75,stations[0],.5);flash(17.75,1400,800,60);shake(17.75,4);
+    tl.to(pipe,{x:1460,duration:.25,ease:'power2.out'},17.75);tl.set(pebG,{opacity:1},17.8);tl.to(flow,{t:5,duration:5,ease:'none'},17.8);
+    const rawL=text(world,['RAW DATA'],{x:1400,y:940,size:40,font:'DM Mono',wt:500,anchor:'middle'});popIn(17.95,rawL,.03);dropOut(20.6,rawL);
+    pose(18.0,POSE.BUCKET,.25);
+    tl.set(rig,{bucket:0},18.3);tl.set(bkFloor,{opacity:1},18.3);burst(18.3,1319,700,{n:3,kind:'puff',dir:0,speed:100,dur:.6});
+    pose(18.32,{...POSE.CARRY,uaF:150,laF:40,torso:0},.15,'power2.out');tl.set(rig,{pick:1},18.47);pose(18.5,POSE.CARRY,.2);
+    const OPEN=18.1,ODUR=3.3,inv=v=>v<.5?Math.sqrt(v/2):1-Math.sqrt((1-v)/2); // inverse of power1.inOut: when the front reaches a fraction v
+    tl.to(dig1,{x:4650,duration:ODUR,ease:'power1.inOut'},OPEN);tl.to(pipe,{x:4340,duration:ODUR,ease:'power1.inOut'},OPEN);shake(OPEN,3);
+    stations.forEach((st,i)=>{if(i)popEl(OPEN+ODUR*inv((stX[i]-1460)/2880),st,.5);});
+    for(let k=1;k<8;k++)burst(OPEN+ODUR*inv(k/8),1450+3200*k/8,560,{n:2,kind:'puff',dir:0,speed:120,dur:.7});
+    camTo(15.0,.8,{y:490},{y:520});
+    camTo(17.9,1.1,{x:2300,y:610,s:.8},{x:1700,y:650,s:.7});
+    tl.to(cam,{x:P(3600,4300),duration:3.4,ease:'none'},19.0);
+    tag(15.2,'LAYER I · INGEST + CDC',P([120,86],[90,1820]),22.4);
     const T2=text(hudT,P(['READ THE LOG, NOT THE TABLE.'],['READ THE LOG,','NOT THE TABLE.']),{x:P(120,90),y:P(250,1360),size:P(110,130),maxW:P(1680,900)});
-    popIn(16.8,T2,.045);dropOut(21.8,T2);
-    walk(15.8,4380,6.4);
+    popIn(18.8,T2,.045);dropOut(21.8,T2);
+    card(19.3,21.9,'15-25 MIN TO REAL-TIME',['RISK DATA PLATFORM · STONEX','DEBEZIUM → REDPANDA → STRUCTURED STREAMING'],P([120,800],[90,200]),P(860,900));
+    card(19.9,21.95,'180+ TO 60 COLUMNS',['SCHEMA CUT WITH STAKEHOLDERS + BAs'],P([1040,800],[90,470]),P(760,900));
+    walk(18.7,4380,3.7);
     // MEDALLION 23-31
     strike(22.85,{at:[4500,700],hitPose:POSE.DOWN,followPose:POSE.DOWN,rest:false,dir:1,wind:.4});tl.to(shaft,{y:1000,duration:.25,ease:'power2.out'},22.87);
     tl.set(rig,{pick:2},23.1);pose(23.1,POSE.CLIMB,.3);tl.to(rig,{x:4550,duration:.3,ease:'power2.out'},23.1);tl.to(rig,{keyframes:[{y:660,duration:.12,ease:'power2.out'},{y:820,duration:.18,ease:'power2.in'}]},23.1);
@@ -290,19 +369,55 @@ export class TunnelScene {
     tag(23.4,'LAYER II · MEDALLION LAKEHOUSE',P([120,1040],[90,1820]),30.2);
     const SL=[['BRONZE · RAW',1160,24.0],['SILVER · CLEAN',1780,26.4],['GOLD · READY',2330,28.6]];
     SL.forEach(s=>popIn(s[2],text(labelsG,[s[0]],{x:3700,y:s[1],size:76,maxW:700}),.05));
-    // AGENTS 31-40
-    pose(30.4,POSE.CARRY,.3);tl.set(rig,{pick:1},30.5);rig._lx=4550;walk(30.6,4720,.45,'power1.inOut');
-    camTo(30.4,1.4,{x:5620,y:2720,s:.58},{x:4880,y:2720,s:.6});
-    tag(31.0,'LAYER III · MULTI-AGENT ORCHESTRATION',P([1200,64],[90,1820]),39.4);tl.to(synRaysIn,{scale:0,duration:.4,ease:'steps(3)'},40.0);
-    gsap.set(chest,{opacity:0});tl.set(chest,{opacity:1},52.9);
-    const supL=text(labelsG,['SUPERVISOR'],{x:4272,y:2642,size:46,font:'DM Mono',wt:500,fill:I});popIn(31.2,supL,.03);
+    card(24.6,29.9,'20+ PIPELINES MIGRATED',['STREAMSETS → DATABRICKS LAKEHOUSE','PLATFORM DECOMMISSIONED'],P([1180,150],[400,1040]),P(620,600));
+    card(26.6,29.95,'$50K / YEAR SAVED',['INFRASTRUCTURE COST · DELTA LAKE'],P([1180,470],[400,1440]),P(620,600));
+    // LANDING 30-32: off the ladder and along the passage to the graph cavern wall
+    pose(30.4,POSE.CARRY,.3);tl.set(rig,{pick:1},30.5);rig._lx=4550;walk(30.55,5380,1.1,'power1.inOut');
+    camTo(30.4,1.6,{x:5150,y:2620,s:.8},{x:5000,y:2650,s:.65});
+
+    // KNOWLEDGE GRAPH → MCP: authored at 40-46, plays at 32-38
+    tl=shifted(-8);
+    strike(40.2,{at:[6990+KGX,2724],wind:.4});tl.set(face2,{opacity:1},40.2);tl.to(cav,{x:8300,duration:.7,ease:'power2.out'},40.25);
+    camTo(39.8,1.3,{x:7650+KGX,y:2470,s:.95},{x:7650+KGX,y:2470,s:.7});
+    tag(40.6,'LAYER III · KNOWLEDGE GRAPH',P([460,64],[90,1820]),43.5);
+    walk(40.6,7130+KGX,.8,'power1.inOut');
+    edges.forEach((e,i)=>tl.to(e[0],{attr:{'stroke-dashoffset':0},duration:.4,ease:'power2.out'},41.2+i*.06));
+    nodes.forEach((n,i)=>{gsap.set(n,{transformOrigin:'50% 50%'});popEl(41.3+i*.08,n,.4);});
+    tl.set(bound,{opacity:1},42.2);gsap.set(bound,{scaleX:0,transformOrigin:'0% 50%'});tl.to(bound,{scaleX:1,duration:.5,ease:'power2.out'},42.2);tl.set(boundL,{opacity:1},42.6);popEl(42.6,boundL,.35);
+    const T4a=text(hudT,P(['ONE CONNECTED GRAPH.'],['ONE CONNECTED','GRAPH.']),{x:P(120,90),y:P(1035,1440),size:P(84,130),maxW:P(1680,900)});popIn(41.5,T4a,.045);dropOut(43.4,T4a);
+    card(41.6,43.4,'STARDOG KG',['USDM ONTOLOGY · CLIENT GSK','RAW → FOUNDATION → TRUSTED → GRAPH'],P([1490,370],[90,200]),P(410,900));
+    tag(43.7,'LAYER IV · MCP SERVING LAYER',P([460,64],[90,1820]),46.0);
+    pose(43.4,POSE.LOOK,.4);
+    doors.forEach((d,i)=>{const T=43.8+i*.3;gsap.set(d,{transformOrigin:'0% 50%'});tl.to(d,{scaleX:.1,duration:.2,ease:'back.out(2)'},T);tl.to(dpaths[i],{attr:{'stroke-dashoffset':0},duration:.3,ease:'power2.in'},T+.12);tl.set(nodes[DN[i]],{attr:{fill:R}},T+.42);});
+    const T4=text(hudT,P(['TRUSTED DATA, AGENT-READY.'],['TRUSTED DATA,','AGENT-READY.']),{x:P(120,90),y:P(1035,1440),size:P(84,130),maxW:P(1680,900)});popIn(44.0,T4,.045);dropOut(46.0,T4);
+    card(44.2,45.9,'MCP SERVER',['GOVERNED DATA AS TOOLS','FOR LLMs + AI AGENTS'],P([1490,370],[90,200]),P(410,900));
+    litEdges.forEach((e,i)=>tl.to(e,{attr:{'stroke-dashoffset':0},duration:.3},45.3+i*.03));
+    nodes.forEach((n,i)=>tl.set(n,{attr:{fill:R}},45.45+i*.03));
+    tl=root;
+
+    // MCP → AGENTS 38-40: the cavern opens east and the MCP connector lights up into the supervisor
+    pose(37.9,POSE.CARRY,.2);tl.to(cav,{x:8960,duration:.6,ease:'power2.out'},38.0);
+    walk(38.1,4720+AGX,1.8,'power2.inOut');
+    [conn,connL].forEach(p=>{const L=p.getTotalLength();p.setAttribute('stroke-dasharray',L+5);p.setAttribute('stroke-dashoffset',L+5);});
+    tl.to(conn,{attr:{'stroke-dashoffset':0},duration:.6,ease:'power2.out'},38.2);tl.to(connL,{attr:{'stroke-dashoffset':0},duration:.6,ease:'power2.in'},38.5);
+    popIn(38.6,text(world,['MCP CONNECTOR'],{x:7080,y:2150,size:40,font:'DM Mono',wt:500}),.03);
+    camTo(38.0,1.8,{x:7900,y:2520,s:.45},{x:7200,y:3500,s:.45});
+
+    // AGENTIC AI: authored at 30.4-40, plays at 40-49.6
+    tl=shifted(9.6);
+    camTo(30.4,1.4,{x:5620+AGX,y:2720,s:.58},{x:4880+AGX,y:2720,s:.6});
+    tag(31.0,'LAYER V · AGENTIC AI',P([1100,130],[90,1820]),38.4);tl.to(synRaysIn,{scale:0,duration:.4,ease:'steps(3)'},40.0);
+    const supL=text(agLbl,['GROOT · SUPERVISOR'],{x:4272,y:2642,size:46,font:'DM Mono',wt:500,fill:I});popIn(31.2,supL,.03);
     pose(32.0,{...POSE.POINT,uaF:-120,torso:-10},.3,'power2.out');pose(32.32,POSE.POINT,.08,'power3.in');
     [...tunA,...tunB].forEach(p=>{const L=p.getTotalLength();p.setAttribute('stroke-dasharray',L+5);p.setAttribute('stroke-dashoffset',L+5);});
-    tunA.forEach((p,i)=>{tl.to(p,{attr:{'stroke-dashoffset':0},duration:.35,ease:'power2.out'},32.4+i*.3);popEl(32.7+i*.3,agG[i],.4);burst(32.75+i*.3,AG[i][0],AG[i][1],{n:4,kind:'speck',dir:0,speed:300});});
-    AG.forEach(a=>{});agG.forEach(g=>gsap.set(g,{transformOrigin:'50% 50%'}));
-    const agL=text(labelsG,['SPECIALIST AGENTS'],{x:5860,y:2245,size:50,font:'DM Mono',wt:500});popIn(33.6,agL,.025);
-    const T3=text(hudT,P(['EVIDENCE, NOT VERDICTS.'],['EVIDENCE,','NOT VERDICTS.']),{x:P(120,90),y:P(960,1370),size:P(80,130),maxW:P(1680,900)});popIn(33.0,T3,.045);dropOut(39.0,T3);
-    const sub=text(hudT,[P('LANGGRAPH · FASTAPI · VECTOR SEARCH','LANGGRAPH · FASTAPI')].concat(P([],['VECTOR SEARCH'])),{x:P(122,90),y:P(1036,1630),size:P(32,40),font:'DM Mono',wt:500,lh:1.4});typeOn(34.2,sub,.02);dropOut(39.0,sub);
+    tunA.forEach((p,i)=>{tl.to(p,{attr:{'stroke-dashoffset':0},duration:.35,ease:'power2.out'},32.4+i*.3);popEl(32.7+i*.3,agG[i],.4);burst(32.75+i*.3,AG[i][0]+AGX,AG[i][1],{n:4,kind:'speck',dir:0,speed:300});});
+    agG.forEach(g=>gsap.set(g,{transformOrigin:'50% 50%'}));
+    const agN=['DATABRICKS','SERVICENOW','CONFLUENCE','DATADOG'];
+    AG.forEach((a,i)=>{const t=mk('text',{x:a[0],y:a[1]+11,'text-anchor':'middle','font-family':'DM Mono','font-weight':500,'font-size':32,fill:I},agLbl);t.textContent=agN[i];popEl(32.8+i*.3,t,.4);});
+    const agL=text(agLbl,['SPECIALIST AGENTS'],{x:5860,y:2245,size:50,font:'DM Mono',wt:500});popIn(33.6,agL,.025);
+    const T3=text(hudT,P(['EVIDENCE, NOT VERDICTS.'],['EVIDENCE,','NOT VERDICTS.']),{x:P(120,90),y:P(960,1370),size:P(80,130),maxW:P(1680,900)});popIn(33.0,T3,.045);dropOut(38.8,T3);
+    card(34.4,38.6,'GROOT · 70+ ENGINEERS',['MULTI-AGENT INCIDENT RCA + JOB MONITORING','STAFF DATA ENGINEER · STONEX · 2025-26'],P([120,110],[90,200]),P(600,900));
+    const sub=text(hudT,[P('LANGGRAPH · FASTAPI · VECTOR SEARCH','LANGGRAPH · FASTAPI')].concat(P([],['VECTOR SEARCH'])),{x:P(122,90),y:P(1036,1630),size:P(32,40),font:'DM Mono',wt:500,lh:1.4});typeOn(34.2,sub,.02);dropOut(38.6,sub);
     pose(34.0,POSE.CARRY,.35);
     tunB.forEach((p,i)=>tl.to(p,{attr:{'stroke-dashoffset':0},duration:.4,ease:'power2.out'},34.6+i*.15));
     const lan=AG.map((a,i)=>{const g=mk('g',{opacity:0},lanternsG);const inn=mk('g',{},g);mk('path',{d:'M-10 -46 Q0 -60 10 -46',stroke:I,'stroke-width':5,fill:'none'},inn);mk('path',{d:rect(-18,-44,36,48,2,20),fill:I},inn);mk('rect',{x:-8,y:-34,width:16,height:24,fill:K},inn);mk('rect',{x:-22,y:2,width:44,height:8,fill:I},inn);
@@ -310,48 +425,40 @@ export class TunnelScene {
     lan.forEach((g,i)=>{const a=AG[i];tl.set(g,{opacity:1},34.0+i*.1);gsap.set(g.firstChild,{scale:0,transformOrigin:'50% 100%'});tl.to(g.firstChild,{scale:1,duration:.4,ease:'back.out(3)'},34.0+i*.1);
       const e0=i<2?[6300-i*110,2610]:[6300-(i-2)*110,2835];const pts=[[a[0],a[1]+40],[a[0]+100,a[1]+30],[e0[0],e0[1]+(i<2?40:0)],[6490+i*120,2850]];const p={t:0};const T=35.0+i*.22;
       tl.to(p,{t:1,duration:1.5,ease:'power1.inOut',onUpdate:()=>{const f=p.t*3,k=Math.min(2,Math.floor(f)),u=f-k;const A=pts[k],B=pts[k+1]||pts[k];g.setAttribute('transform',`translate(${A[0]+(B[0]-A[0])*u},${A[1]+(B[1]-A[1])*u-Math.abs(Math.sin(p.t*Math.PI*6))*10})`);}},T);});
-    camTo(34.6,2.0,{},{x:6000});
-    gsap.set(synRaysIn,{scale:0});tl.to(synRaysIn,{scale:1,duration:.6,ease:'steps(4)'},37.2);tl.set(syn,{attr:{fill:K}},37.2);flash(37.2,6700,2700,140);shake(37.2,6);
-    const synL=text(labelsG,['SYNTHESIS'],{x:6430,y:2628,size:46,font:'DM Mono',wt:500,fill:I});popIn(37.4,synL,.03);
-    walk(37.0,6680,2.6,'power1.inOut');camTo(37.0,2.6,{},{x:6650});
-    // KG 40-47
-    strike(40.2,{at:[6990,2724],wind:.4});tl.set(face2,{opacity:1},40.2);tl.to(cav,{x:8300,duration:.7,ease:'power2.out'},40.25);
-    camTo(39.8,1.3,{x:7650,y:2470,s:.95},{x:7650,y:2470,s:.7});
-    tag(40.6,'LAYER IV · KNOWLEDGE GRAPH + MCP',P([120,64],[90,1820]),46.0);
-    walk(40.6,7130,.8,'power1.inOut');
-    edges.forEach((e,i)=>tl.to(e[0],{attr:{'stroke-dashoffset':0},duration:.4,ease:'power2.out'},41.2+i*.06));
-    nodes.forEach((n,i)=>{gsap.set(n,{transformOrigin:'50% 50%'});popEl(41.3+i*.08,n,.4);});
-    tl.set(bound,{opacity:1},42.2);gsap.set(bound,{scaleX:0,transformOrigin:'0% 50%'});tl.to(bound,{scaleX:1,duration:.5,ease:'power2.out'},42.2);tl.set(boundL,{opacity:1},42.6);popEl(42.6,boundL,.35);
-    const T4=text(hudT,P(['TRUSTED DATA, AGENT-READY.'],['TRUSTED DATA,','AGENT-READY.']),{x:P(120,90),y:P(1035,1440),size:P(84,130),maxW:P(1680,900)});popIn(42.8,T4,.045);dropOut(46.0,T4);
-    pose(43.4,POSE.LOOK,.4);
-    doors.forEach((d,i)=>{const T=43.8+i*.3;gsap.set(d,{transformOrigin:'0% 50%'});tl.to(d,{scaleX:.1,duration:.2,ease:'back.out(2)'},T);tl.to(dpaths[i],{attr:{'stroke-dashoffset':0},duration:.3,ease:'power2.in'},T+.12);tl.set(nodes[DN[i]],{attr:{fill:R}},T+.42);});
-    litEdges.forEach((e,i)=>tl.to(e,{attr:{'stroke-dashoffset':0},duration:.3},45.3+i*.03));
-    nodes.forEach((n,i)=>tl.set(n,{attr:{fill:R}},45.45+i*.03));
-    // INSTRUMENTS 47-51
-    pose(45.9,POSE.CARRY,.2);tl.to(cav,{x:8952,duration:.6,ease:'power2.out'},46.0);
-    walk(46.0,8745,1.1,'power2.inOut');tl.to(rig,{torso:16,duration:.3},46.1);tl.to(rig,{torso:4,duration:.3},46.8);
-    camTo(46.0,1.2,{x:9500,y:2650,s:.85},{x:9420,y:2650,s:.75});
+    camTo(34.6,2.0,{},{x:6000+AGX});
+    gsap.set(synRaysIn,{scale:0});tl.to(synRaysIn,{scale:1,duration:.6,ease:'steps(4)'},37.2);tl.set(syn,{attr:{fill:K}},37.2);flash(37.2,6700+AGX,2700,140);shake(37.2,6);
+    const synL=text(agLbl,['SYNTHESIS'],{x:6430,y:2628,size:46,font:'DM Mono',wt:500,fill:I});popIn(37.4,synL,.03);
+    walk(37.0,6680+AGX,2.6,'power1.inOut');camTo(37.0,2.6,{},{x:6650+AGX});
+    tl=root;
+
+    // INSTRUMENTS → TREASURE → END: authored at 45.9-61.5, plays 3.8s later
+    tl=shifted(3.8);
+    gsap.set(chest,{opacity:0});tl.set(chest,{opacity:1},52.9);
+    pose(45.9,POSE.CARRY,.2);
+    walk(46.0,8745+TRX,1.1,'power2.inOut');tl.to(rig,{torso:16,duration:.3},46.1);tl.to(rig,{torso:4,duration:.3},46.8);
+    camTo(46.0,1.2,{x:9500+TRX,y:2650,s:.85},{x:9420+TRX,y:2650,s:.75});
     tag(46.8,'INSTRUMENTS',P([120,64],[90,1820]),50.9);
-    rocks.forEach((r,i)=>{const T=47.4+i*.3;strike(T,{at:[8952,2726],wind:.16,hit:.05,follow:.07,rest:i===11?POSE.CARRY:false,chips:4,amp:6});
-      gsap.set(r.el,{y:-900,rotation:rr(-90,90),transformOrigin:'50% 100%'});tl.to(r.el,{y:0,duration:.34,ease:'bounce.out'},T+.02);tl.to(r.el,{rotation:rr(-3,3),duration:.3,ease:'power2.out'},T+.02);burst(T+.14,r.x,r.y+50,{n:3,kind:'puff',dir:0,speed:100,dur:.6});});
+    card(47.6,50.9,'DATABRICKS CERTIFIED',['STAR PERFORMER · AI CHAMPION','WINNER · STONEX ENTERPRISE AI HACKATHON'],P([1080,130],[90,260]),P(760,900));
+    rocks.forEach((r,i)=>{const T=47.4+i*.3;strike(T,{at:[8952+TRX,2726],wind:.16,hit:.05,follow:.07,rest:i===11?POSE.CARRY:false,chips:4,amp:6});
+      gsap.set(r.el,{y:-900,opacity:0,rotation:rr(-90,90),transformOrigin:'50% 100%'});tl.set(r.el,{opacity:1},T+.02);tl.to(r.el,{y:0,duration:.34,ease:'bounce.out'},T+.02);tl.to(r.el,{rotation:rr(-3,3),duration:.3,ease:'power2.out'},T+.02);burst(T+.14,r.x+TRX,r.y+50,{n:3,kind:'puff',dir:0,speed:100,dur:.6});});
     // TREASURE 51-56
     tl.to(lbT,{attr:{y:0},duration:.5,ease:'power3.out'},51.0);tl.to(lbB,{attr:{y:H-lbH},duration:.5,ease:'power3.out'},51.0);
-    camTo(51.0,5.0,{x:9450,y:2680,s:1.1},{x:9300,y:2690,s:.9},'power1.inOut');
-    strike(52.85,{at:[8952,2726],wind:1.35,hit:.12,follow:.6,windPose:{...POSE.WIND,torso:-26,uaF:128,uaB:120},sxw:1.07,syw:.92,windEase:'power2.inOut',k:2.2,amp:9,slow:true,chips:14,dir:1,restDur:.5});
+    camTo(51.0,5.0,{x:9450+TRX,y:2680,s:1.1},{x:9300+TRX,y:2690,s:.9},'power1.inOut');
+    strike(52.85,{at:[8952+TRX,2726],wind:1.35,hit:.12,follow:.6,windPose:{...POSE.WIND,torso:-26,uaF:128,uaB:120},sxw:1.07,syw:.92,windEase:'power2.inOut',k:2.2,amp:9,slow:true,chips:14,dir:1,restDur:.5});
     rocks.forEach((r,i)=>tl.to(r.el,{y:rr(700,1100),x:rr(100,500),rotation:rr(-200,200),duration:rr(.9,1.3),ease:'power2.in'},52.9+i*.035));
     covers.forEach((c,i)=>tl.to(c,{y:900,rotation:rr(-25,25),transformOrigin:'50% 100%',duration:1.1,ease:'power2.in'},52.95+i*.07));
     gsap.set(lid,{transformOrigin:'100% 100%'});tl.to(lid,{keyframes:[{rotation:14,duration:.14},{rotation:9,duration:.12},{rotation:38,duration:.16},{rotation:32,duration:.1},{rotation:112,duration:.26,ease:'power2.out'}]},53.7);
-    gsap.set(crIn,{scale:0});tl.to(crIn,{scale:1,duration:.6,ease:'steps(5)'},54.2);flash(54.2,9550,2690,180);
+    gsap.set(crIn,{scale:0});tl.to(crIn,{scale:1,duration:.6,ease:'steps(5)'},54.2);flash(54.2,9550+TRX,2690,180);
     tl.to(flood,{attr:{r:1700},duration:.6,ease:'steps(4)'},54.55);
-    rig._lx=8745;walk(53.5,9330,.6,'power2.inOut');
-    tl.set(rig,{pick:0},54.2);tl.set(planted,{opacity:1,attr:{transform:'translate(9270,2742) rotate(-8)'}},54.2);burst(54.2,9270,2850,{n:3,kind:'puff',dir:0,speed:120,dur:.7});
-    tl.set(rig,{px:9445,py:2712},54.2);
+    rig._lx=8745+TRX;walk(53.5,9330+TRX,.6,'power2.inOut');
+    tl.set(rig,{pick:0},54.2);tl.set(planted,{opacity:1,attr:{transform:`translate(${9270+TRX},2742) rotate(-8)`}},54.2);burst(54.2,9270+TRX,2850,{n:3,kind:'puff',dir:0,speed:120,dur:.7});
+    tl.set(rig,{px:9445+TRX,py:2712},54.2);
     pose(54.3,POSE.LEAN,.3);tl.to(rig,{pin:1,duration:.3,ease:'power2.inOut'},54.3);
     pose(54.62,{...POSE.HAND,thF:-40,shF:60},.26,'power2.out');pose(54.88,POSE.HAND,.14);
     pose(55.05,POSE.PLAN,.38,'power2.inOut');
     // END 56-61.5
     tl.to(lbT,{attr:{y:-lbH},duration:.5,ease:'power3.in'},56.0);tl.to(lbB,{attr:{y:H},duration:.5,ease:'power3.in'},56.0);
-    const cs=w2s(9550,2700,P({x:9450,y:2680,s:1.1},{x:9300,y:2690,s:.9}));engulf.setAttribute('cx',cs[0]);engulf.setAttribute('cy',cs[1]);
+    const cs=w2s(9550+TRX,2700,P({x:9450+TRX,y:2680,s:1.1},{x:9300+TRX,y:2690,s:.9}));engulf.setAttribute('cx',cs[0]);engulf.setAttribute('cy',cs[1]);
     tl.to(engulf,{attr:{r:Math.hypot(W,H)},duration:.4,ease:'steps(4)'},56.0);
     tl.set([endBg,panel],{opacity:1},56.42);tl.set(engulf,{opacity:0},56.42);
     const PN=P({x:160,y:170,width:1600,height:640},{x:90,y:380,width:900,height:1060});
@@ -366,21 +473,23 @@ export class TunnelScene {
     gsap.set(epi,{rotation:180,opacity:0,svgOrigin:'0 0'});tl.set(epi,{opacity:1},57.4);tl.to(epi,{rotation:158,duration:.7,ease:'bounce.out',svgOrigin:'0 0'},57.4);
     const dust=mk('path',{d:blob(0,0,6,5),fill:I,opacity:0},endG);const dx=PN.x+PN.width*.72;
     tl.set(dust,{opacity:1},59.2);tl.fromTo(dust,{attr:{transform:`translate(${dx},${PN.y-260})`}},{attr:{transform:`translate(${dx+30},${PN.y-6})`},duration:1.4,ease:'sine.inOut',immediateRender:false},59.2);
+    tl=root;
     tl.to({},{duration:.01},DUR-.01);
 
     // render state
-    this.els={world,fgL,c1r,face1,c2r,c3r,face2,pebs};this.dig1=dig1;this.shaft=shaft;this.cav=cav;this.flow=flow;
+    this.els={world,fgL,c1r,c4r,face1,c2r,c3r,face2,pebs};this.dig1=dig1;this.pipe=pipe;this.shaft=shaft;this.cav=cav;this.flow=flow;
     this.render();
     tl.time(startT);this.render();
   }
 
-  render(){const {world,fgL,c1r,face1,c2r,c3r,face2,pebs}=this.els;const c=this.cam,s=this.sh,W=this.W,H=this.H;
+  render(){const {world,fgL,c1r,c4r,face1,c2r,c3r,face2,pebs}=this.els;const c=this.cam,s=this.sh,W=this.W,H=this.H;
     world.setAttribute('transform',`translate(${W/2+s.x},${H/2+s.y}) scale(${c.s}) translate(${-c.x},${-c.y})`);
     fgL.setAttribute('transform',`translate(${W/2+s.x*1.6},${H/2+s.y*1.6}) scale(${c.s}) translate(${-c.x*1.25},${-c.y*1.25})`);
     c1r.setAttribute('width',Math.max(0,this.dig1.x+2000));face1.setAttribute('transform',`translate(${Math.min(this.dig1.x,4650)},0)`);
+    c4r.setAttribute('width',Math.max(0,this.pipe.x-1200));
     c2r.setAttribute('height',Math.max(0,this.shaft.y-690));
-    c3r.setAttribute('width',Math.max(0,this.cav.x-6990));face2.setAttribute('transform',`translate(${this.cav.x-8952},0)`);
-    const Lp=2540;pebs.forEach((p,i)=>{const x=1760+((i/pebs.length)*Lp+this.flow.t*620)%Lp;p.setAttribute('transform',`translate(${x.toFixed(1)},${800+Math.sin(i*1.7)*8})`);});
+    c3r.setAttribute('width',Math.max(0,this.cav.x-6990));face2.setAttribute('transform',`translate(${this.cav.x},0)`);
+    const Lp=3080;pebs.forEach((p,i)=>{const x=1240+((i/pebs.length)*Lp+this.flow.t*620)%Lp;p.setAttribute('transform',`translate(${x.toFixed(1)},${800+Math.sin(i*1.7)*8})`);});
     this.renderRig();}
 
   renderRig(){const r=this.rig,G=this.R;let {torso,head,uaF,laF,uaB,laB,thF,shF,thB,shB}=r;
@@ -398,5 +507,7 @@ export class TunnelScene {
     G.armF.ua.setAttribute('transform',`translate(2,-72) rotate(${uaF})`);G.armF.la.setAttribute('transform',`translate(0,40) rotate(${laF})`);
     G.legB.th.setAttribute('transform',`translate(-4,0) rotate(${thB})`);G.legB.sn.setAttribute('transform',`translate(0,50) rotate(${shB})`);
     G.legF.th.setAttribute('transform',`translate(4,0) rotate(${thF})`);G.legF.sn.setAttribute('transform',`translate(0,50) rotate(${shF})`);
-    G.pickHand.setAttribute('opacity',r.pick===1?1:0);G.pickBack.setAttribute('opacity',r.pick===2?1:0);}
+    G.pickHand.setAttribute('opacity',r.pick===1?1:0);G.pickBack.setAttribute('opacity',r.pick===2?1:0);
+    // the carried bucket hangs plumb from the hand unless tilted to pour
+    G.bucketHand.setAttribute('opacity',r.bucket?1:0);if(r.bucket){G.bucketHand.setAttribute('transform',`rotate(${r.tilt-(r.rot+torso+uaF+laF)})`);G.bucketIn.setAttribute('transform',`translate(0,${-52*Math.min(1,r.tilt/107)})`);}}
 }
